@@ -11,31 +11,39 @@ process_arcep <- function(file_path) {
 
 
 
-  tmp <- readxl::read_excel(file_path, sheet = feuille_commune, col_names = FALSE, n_max = 10)
+  tmp <- readxl::read_excel(file_path, sheet = feuille_commune, n_max = 20)
 
 
 
-  ligne_sauter <- which(apply(tmp, 1, function(x) any(x == "Code commune"))) - 1
+  ligne_sauter <- which(
+    rowSums(tmp == "Code commune", na.rm = TRUE) > 0
+  )[1] - 1
 
 
 
-  arcep_data <- readxl::read_excel(file_path, sheet = feuille_commune , skip = ligne_sauter)
+  arcep_data <- readxl::read_excel(
+    file_path,
+    sheet = feuille_commune,
+    skip = ligne_sauter
+  )
+
+  names_arcep <- names(arcep_data)
 
 
 
-  source_retenue_col <- names(arcep_data)[grepl("^Source retenue",names(arcep_data))] # Source retenue pour l'estimation des locaux
+  source_retenue_col <- grepl("^Source retenue",names_arcep, value= TRUE)[1] # Source retenue pour l'estimation des locaux
 
 
 
-  locaux_col <- names(arcep_data)[grepl("^Meilleure estimation des locaux", names(arcep_data))][1] # colonne  Meilleure estimation des locaux
+  locaux_col <- grepl("^Meilleure estimation des locaux", names_arcep, value=TRUE)[1] # colonne  Meilleure estimation des locaux
 
 
 
-  locaux_en_cours_col <- names(arcep_data)[grepl("^Estimation locaux en cours", names(arcep_data))][1] # colonne  Estimation des locaux en cours de construction
+  locaux_en_cours_col <- grep("^Estimation locaux en cours", names_arcep, value = TRUE)[1] # colonne  Estimation des locaux en cours de construction
 
 
 
-  trimestres <- grep("^T[1-4] \\d{4}$", names(arcep_data), value = TRUE) # liste des Colonnes des locaux raccordables (T4 2017,...T1 2024, ...)
+  trimestres <- grep("^T[1-4] \\d{4}$", names_arcep, value = TRUE) # liste des Colonnes des locaux raccordables (T4 2017,...T1 2024, ...)
 
 
 
@@ -61,10 +69,15 @@ process_arcep <- function(file_path) {
 
   # la fonction retourne la data ARCEP avec les informations pertinentes du nouveau trimestre publié
 
-  arcep_data %>%
-    dplyr::rename(locaux_en_cours_col_rename = locaux_en_cours_col)%>%
-    dplyr::select(`Code commune`, source_retenue_col, locaux_col, locaux_en_cours_col_rename, base_sans_en_cours_construction, all_of(locaux_racc_nouveau_trimestre), nouveau_taux_raccordable)
-
+  arcep_data[, c(
+    "Code commune",
+    source_retenue_col,
+    locaux_col,
+    locaux_en_cours_col_rename,
+    base_sans_en_cours_construction,
+    locaux_racc_nouveau_trimestre,
+    nouveau_taux_raccordable
+  )]
 
 }
 

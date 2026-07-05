@@ -4,25 +4,85 @@
 
 prod_stats <- function(avicca, departements, orange_data=NULL){
 
+
+  vars_name <- names(avicca)
+
+  cols_locaux_raccordables <- grep("^T[1-4] \\d{4}$", vars_name, value = TRUE)
+  cols_taux_couverture <- paste0("%", cols_locaux_raccordables)
+
+
+
+
+  # Classifier les zonages / OI
+
+  orange <- c("Orange", "Orange RIP hors Orange Concessions")
+
+  orange_concession <- c("Orange Concessions","Orange concessions")
+
+  axione <- c("Axione")
+
+  altitude_infra <- c("Altitude Infra")
+
+  SFR_xp_fibre <- c("SFR/XP Fibre", "SFR/XP Fibre RIP")
+
+  lumière <- c("Lumière")
+
+  Regies_SPL_SIEA <- c('SPL Orne THD', 'Régie du Pays de Bitche', 'Régie FIBRAGGLO',
+                       'Régie FIBRESO', 'Régie du Warndt', "SIeA - Energie & e-Communication de l'Ain")
+
+  plusieurs_opérateurs <- c('Bouygues Telecom + Free + Orange + SFR','Orange + Axione',
+                            'Orange + Altitude Infra','Zeop - Reunicable + SFR + Orange')
+
+
+
+  zone_AMII_AMEL_CPSD <- c("Zone CPSD hors L,33-13 ex RIP", "Zone AMII L,33-13 ex RIP", "Zone AMII L,33-13",
+                           "Zone AMEL ex-RIP", "Zone AMII hors L,33-13", "Zone CPSD L,33-13 ex RIP",
+                           "Zone AMEL", "Zone AMII hors L,33-13 ex RIP", "Zone CPSD hors L,33-13 ex RIP")
+
+
+  zone_rip <- c("RIP", "Zone RIP ex AMII",
+                "Zone mixte RIP et AMEL", "Zone mixte RIP et AMII L,33-13",
+                "Zone mixte RIP et AMII hors L,33-13", "Zone mixte RIP et CPSD")
+
+  zTD <- c("Zone très dense")
+
+  base_avicca <- avicca %>%
+    mutate(
+      `Code département` = str_pad(as.character(`Code département`), 2, "0"),
+      zonage = case_when(
+        `Zonage identifié Avicca` %in% zone_rip ~ "RIP",
+        `Zonage identifié Avicca` %in% zone_AMII_AMEL_CPSD ~ "ZMD privée",
+        `Zonage identifié Avicca` %in% zTD ~ "ZTD",
+        TRUE ~ ""
+      ),
+      operateurs = ifelse(`Opérateur identifié Avicca T4 2023` %in% orange, "Orange",
+                          ifelse(`Opérateur identifié Avicca T4 2023` %in% orange_concession, "Orange Concessions",
+                                 ifelse(`Opérateur identifié Avicca T4 2023` %in% axione, "Axione",
+                                        ifelse(`Opérateur identifié Avicca T4 2023` %in% altitude_infra, "Altitude Infra",
+                                               ifelse(`Opérateur identifié Avicca T4 2023` %in% SFR_xp_fibre, "SFR/XP Fibre",
+                                                      ifelse(`Opérateur identifié Avicca T4 2023` %in% lumière, "Lumière",
+                                                             ifelse(`Opérateur identifié Avicca T4 2023` %in% Regies_SPL_SIEA, "Régies/SPL/SIEA",
+                                                                    ifelse(`Opérateur identifié Avicca T4 2023` %in% plusieurs_opérateurs, "ZTD", "Autres Opérateurs")))))))))
+
+
+
+
+
+
   # S'assurer que les codes de département soient codés sur deux caractères afin de faciliter les jointures
 
-  avicca <- avicca %>%
-    dplyr::mutate(`Code département` = stringr::str_pad(as.character(`Code département`), width = 2, pad = "0"))
+
+  departements$`Code département` <- stringr::str_pad(
+    as.character(departements$`Code département`),
+    width = 2,
+    pad = "0"
+  )
 
 
-  departements <- departements%>%
-    dplyr::mutate(`Code département` = stringr::str_pad(as.character(`Code département`), width = 2, pad = "0"))
+  base_avicca <- dplyr::left_join(base_avicca, departements, by = "Code département")
 
 
-  avicca <- dplyr::left_join(avicca, departements, by = "Code département")
-
-
-
-  trimestres <- grep("^T[1-4] \\d{4}$", names(avicca), value = TRUE) # liste des Colonnes des locaux raccordables (T4 2017,...T1 2024, ...)
-
-
-
-  locaux_racc_nouveau_trimestre <- trimestres[length(trimestres)] # colonne des locaux raccordables du nouveau trimestre publié
+  locaux_racc_nouveau_trimestre <- cols_locaux_raccordables[length(cols_locaux_raccordables)] # colonne des locaux raccordables du nouveau trimestre publié
 
 
 
@@ -41,13 +101,14 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
   # Feuille 1-  Stats DEP - ZIPU : Statistiques du dernier trimestre sur les locaux raccordables et la base sans construction niveau départemental pour les ZIPU
 
 
-  data_niveau_departement_zipu <- avicca %>%
+  data_niveau_departement_zipu <- base_avicca %>%
     dplyr::filter(`Répartition public/privé` != "ZIPRI") %>%
     dplyr::group_by(`Code département`) %>%
     dplyr::summarise(
       !!base_sans_en_cours_construction := sum(.data[[base_sans_en_cours_construction]], na.rm = TRUE),
       !!locaux_racc_nouveau_trimestre := sum(.data[[locaux_racc_nouveau_trimestre]], na.rm = TRUE),
-      `Nom département` = unique(`Nom département`)) %>%
+      `Nom département` = first(`Nom département`),
+      .groups = "drop") %>%
     dplyr::select(`Code département`,`Nom département`, base_sans_en_cours_construction, all_of(locaux_racc_nouveau_trimestre))
 
 
@@ -57,27 +118,20 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
   # Feuille 2- Stats DEP - ZIPRI : Statistiques du dernier trimestre sur les locaux raccordables et la base sans construction niveau départemental pour les ZIPRI
 
 
-  data_niveau_departement_zipri <- avicca %>%
+  data_niveau_departement_zipri <- base_avicca %>%
     dplyr::filter(`Répartition public/privé` == "ZIPRI") %>%
     dplyr::group_by(`Code département`) %>%
     dplyr::summarise(
       !!base_sans_en_cours_construction := sum(.data[[base_sans_en_cours_construction]], na.rm = TRUE),
       !!locaux_racc_nouveau_trimestre := sum(.data[[locaux_racc_nouveau_trimestre]], na.rm = TRUE),
-      `Nom département` = unique(`Nom département`)) %>%
+      `Nom département` = first(`Nom département`),
+      .groups = "drop") %>%
     dplyr::select(`Code département`,`Nom département`, base_sans_en_cours_construction, all_of(locaux_racc_nouveau_trimestre))
 
 
 
   # Feuille 3- Evol couv FTTH - DEP ZIPRI : Evolution couverture FttH dans les départements ZIPRI
 
-
-  cols_locaux_raccordables <- names(avicca)[grepl("^T[1-4] \\d{4}$", names(avicca))]
-
-  cols_taux_couverture <- paste0("%", cols_locaux_raccordables)
-
-
-
-  vars_name <- names(avicca)
 
   # Pour conserver une cohérence avec les cartes au niveau ZIPU réalisées depuis le T4 2025.
 
@@ -97,14 +151,14 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
 
 
 
-  data_evol_couverture_niv_depart_zipri <- avicca %>%
+  data_evol_couverture_niv_depart_zipri <- base_avicca %>%
     dplyr::filter(`Répartition public/privé` == "ZIPRI") %>%
     dplyr::group_by(`Code département`) %>%
     dplyr::summarise(
       across(all_of(cols_locaux_raccordables), ~ sum(.x, na.rm = TRUE)),
       !!base_locaux := sum(.data[[base_locaux]], na.rm = TRUE),
       base_locaux_nouveau_trimestre = sum(.data[[base_sans_en_cours_construction]], na.rm = TRUE),
-      `Nom département` = unique(`Nom département`),
+      `Nom département` = first(`Nom département`),
       .groups = "drop"
     ) %>%
     dplyr::mutate(
@@ -136,14 +190,14 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
   # Feuille 4- Evol couv FTTH - DEP ZIPU : Evolution couverture FttH dans les départements ZIPU
 
 
-  data_evol_couverture_niv_depart_zipu <- avicca %>%
+  data_evol_couverture_niv_depart_zipu <- base_avicca %>%
     dplyr::filter(`Répartition public/privé` != "ZIPRI") %>%
     dplyr::group_by(`Code département`) %>%
     dplyr::summarise(
       across(all_of(cols_locaux_raccordables), ~ sum(.x, na.rm = TRUE)),
       !!base_locaux := sum(.data[[base_locaux]], na.rm = TRUE),
       base_locaux_nouveau_trimestre = sum(.data[[base_sans_en_cours_construction]], na.rm = TRUE),
-      `Nom département` = unique(`Nom département`),
+      `Nom département` = first(`Nom département`),
       .groups = "drop"
     ) %>%
     dplyr::mutate(
@@ -172,31 +226,14 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
   # Feuille 5 - Evol Locaux rac - Zonage : Evolution des prises (locaux) raccordables dans le temps par zonage (RIP, ZTD, ZMD privée)
   # Feuille 6 - Evol couv FTTH - Zonage : Evolution des  taux de locaux raccordables dans le temps par zonage (RIP, ZTD, ZMD privée)
 
-  zone_AMII_AMEL_CPSD <- c("Zone CPSD hors L,33-13 ex RIP", "Zone AMII L,33-13 ex RIP", "Zone AMII L,33-13",
-                           "Zone AMEL ex-RIP", "Zone AMII hors L,33-13", "Zone CPSD L,33-13 ex RIP",
-                           "Zone AMEL", "Zone AMII hors L,33-13 ex RIP", "Zone CPSD hors L,33-13 ex RIP")
 
 
-  zone_rip <- c("RIP", "Zone RIP ex AMII",
-                "Zone mixte RIP et AMEL", "Zone mixte RIP et AMII L,33-13",
-                "Zone mixte RIP et AMII hors L,33-13", "Zone mixte RIP et CPSD")
-
-  zTD <- c("Zone très dense")
-
-
-
-  data <- avicca%>%
-    dplyr::mutate(zonage = ifelse(`Zonage identifié Avicca` %in% zone_rip, "RIP",
-                           ifelse(`Zonage identifié Avicca` %in% zone_AMII_AMEL_CPSD, "ZMD privée",
-                                  ifelse(`Zonage identifié Avicca` %in% zTD, "ZTD",""))))
-
-
-  data_nbre_raccordable_par_zonage <- data%>%
+  data_nbre_raccordable_par_zonage <- base_avicca%>%
     dplyr::group_by(zonage)%>%
     dplyr::summarise(across(all_of(cols_locaux_raccordables), ~ sum(.x, na.rm = TRUE)))
 
 
-  data_taux_raccordable_par_zonage <- data%>%
+  data_taux_raccordable_par_zonage <- base_avicca%>%
     dplyr::group_by(zonage)%>%
     dplyr::summarise(across(all_of(cols_taux_couverture), ~ mean(.x, na.rm = TRUE)))
 
@@ -229,40 +266,6 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
   # Feuille 7- Locaux raccordables par OI filtre sur les lots
 
 
-  # Classification des OI à partir de l'identification faite par Avicca en T4 2023 dans l'Open data
-
-  orange <- c("Orange", "Orange RIP hors Orange Concessions")
-
-  orange_concession <- c("Orange Concessions","Orange concessions")
-
-  axione <- c("Axione")
-
-  altitude_infra <- c("Altitude Infra")
-
-  SFR_xp_fibre <- c("SFR/XP Fibre", "SFR/XP Fibre RIP")
-
-  lumière <- c("Lumière")
-
-  Regies_SPL_SIEA <- c('SPL Orne THD', 'Régie du Pays de Bitche', 'Régie FIBRAGGLO',
-                       'Régie FIBRESO', 'Régie du Warndt', "SIeA - Energie & e-Communication de l'Ain")
-
-  plusieurs_opérateurs <- c('Bouygues Telecom + Free + Orange + SFR','Orange + Axione',
-                            'Orange + Altitude Infra','Zeop - Reunicable + SFR + Orange')
-
-
-
-
-  data <- data %>%
-    dplyr::mutate(operateurs = ifelse(`Opérateur identifié Avicca T4 2023` %in% orange, "Orange",
-                               ifelse(`Opérateur identifié Avicca T4 2023` %in% orange_concession, "Orange Concessions",
-                                      ifelse(`Opérateur identifié Avicca T4 2023` %in% axione, "Axione",
-                                             ifelse(`Opérateur identifié Avicca T4 2023` %in% altitude_infra, "Altitude Infra",
-                                                    ifelse(`Opérateur identifié Avicca T4 2023` %in% SFR_xp_fibre, "SFR/XP Fibre",
-                                                           ifelse(`Opérateur identifié Avicca T4 2023` %in% lumière, "Lumière",
-                                                                  ifelse(`Opérateur identifié Avicca T4 2023` %in% Regies_SPL_SIEA, "Régies/SPL/SIEA",
-                                                                         ifelse(`Opérateur identifié Avicca T4 2023` %in% plusieurs_opérateurs, "ZTD", "Autres Opérateurs")))))))))
-
-
 
   if (!is.null(orange_data)) {
     var_lot <- "source_orange_lot"
@@ -274,7 +277,7 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
 
 
 
-  data <- data %>%
+  base_avicca <- base_avicca %>%
     dplyr::mutate(
       `Lot FC cuivre` = case_when(
 
@@ -296,14 +299,18 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
         .data[[var_lot]] == "PreselectionLot7" ~ "Lot 7",
 
         TRUE ~ ""
-      )
+      ),
+      niveau_couverture_ftth = ifelse(.data[[nouveau_taux_raccordable]] < 0.9, "Moins de 90%",
+                                      ifelse(.data[[nouveau_taux_raccordable]] < 0.95, "90-95%",
+                                             ifelse(.data[[nouveau_taux_raccordable]] < 0.99, "95-99%",
+                                                    "99% et plus")))
     )
 
 
 
 
 
-  data_oi_lot_locaux <- data %>%
+  data_oi_lot_locaux <- base_avicca %>%
     dplyr::group_by(operateurs, `Lot FC cuivre`) %>%
     dplyr::summarise(
       !!paste0("locaux raccordables ", locaux_racc_nouveau_trimestre) :=
@@ -323,7 +330,7 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
   # Feuille 8 – Locaux raccordables par zonage, filtre par lot (statistiques similaires aux précédentes)
 
 
-  data_zonage_lot_locaux <- data %>%
+  data_zonage_lot_locaux <- base_avicca %>%
     dplyr::group_by(zonage, `Lot FC cuivre`) %>%
     dplyr::summarise(
       !!paste0("locaux raccordables ", locaux_racc_nouveau_trimestre) :=
@@ -344,10 +351,10 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
 
   nom_col <- paste0("locaux raccordables", " ", locaux_racc_nouveau_trimestre)
 
-  stats_sur_report_niv_dep_1 <- data%>%
+  stats_sur_report_niv_dep_1 <- base_avicca%>%
     dplyr::group_by(`Code département`, .data[[var_report]])%>%
     dplyr::summarise(!!nom_col := sum(.data[[locaux_racc_nouveau_trimestre]], na.rm=TRUE),
-              `Nom département` = unique(`Nom département`))%>%
+              `Nom département` = first(`Nom département`))%>%
     dplyr::rename(`Report FC cuivre` = !!sym(var_report)) %>%
     dplyr::select(`Code département`, `Nom département`, `Report FC cuivre`, all_of(nom_col))
 
@@ -358,23 +365,14 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
 
   nom_col <- paste0("locaux raccordables en report fc cuivre", " ", locaux_racc_nouveau_trimestre)
 
-  stats_sur_report_niv_dep_2 <- data%>%
+  stats_sur_report_niv_dep_2 <- base_avicca%>%
     dplyr::filter(.data[[var_report]]=="Oui")%>%
     dplyr::group_by(`Code département`, zonage)%>%
     dplyr::summarise(!!nom_col := sum(.data[[locaux_racc_nouveau_trimestre]], na.rm=TRUE),
-              `Nom département` = unique(`Nom département`))%>%
+              `Nom département` = first(`Nom département`))%>%
     dplyr::select(`Code département`,`Nom département`, zonage, all_of(nom_col))
 
 
-
-
-  # Classification couverture FttH
-
-  data <- data %>%
-    dplyr::mutate(niveau_couverture_ftth = ifelse(.data[[nouveau_taux_raccordable]] < 0.9, "Moins de 90%",
-                                           ifelse(.data[[nouveau_taux_raccordable]] < 0.95, "90-95%",
-                                                  ifelse(.data[[nouveau_taux_raccordable]] < 0.99, "95-99%",
-                                                         "99% et plus"))))
 
 
 
@@ -382,12 +380,12 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
 
     # Feuille 11- Refus tiers bloc - DEP : Statistiques sur les refus tiers et blocages éligibilité FttH niveau départemental
 
-    stats_bloc_elig_refus_tiers <- data%>%
+    stats_bloc_elig_refus_tiers <- base_avicca%>%
       dplyr::group_by(`Code département`)%>%
       dplyr::summarise(!!base_sans_en_cours_construction := sum(.data[[base_sans_en_cours_construction]], na.rm = TRUE),
                 nbr_log_refus_tiers = sum(source_orange_nbr_log_refus_tiers, na.rm=TRUE),
                 nb_log_blocage_eligibilite = sum(source_orange_nb_log_blocage_eligibilite, na.rm=TRUE),
-                `Nom département` = unique(`Nom département`))%>%
+                `Nom département` = first(`Nom département`))%>%
       dplyr::ungroup()%>%
       dplyr::mutate(`taux de blocage eligibilite ftth` = ifelse(.data[[base_sans_en_cours_construction]]==0, NA_real_,
                                                          `nb_log_blocage_eligibilite`/.data[[base_sans_en_cours_construction]]),
@@ -402,13 +400,13 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
     # Feuille 12- Refus tiers bloc - OI : refus tiers et blocages éligibilité FttH par opérateur avec filtre niveau de couverture FttH
 
 
-    stats_bloc_elig_refus_tiers_OI <- data %>%
+    stats_bloc_elig_refus_tiers_OI <- base_avicca %>%
       dplyr::group_by(operateurs, niveau_couverture_ftth)%>%
       dplyr::summarise(nbr_log_refus_tiers = sum(source_orange_nbr_log_refus_tiers, na.rm = TRUE),
                 nb_log_blocage_eligibilite = sum(source_orange_nb_log_blocage_eligibilite, na.rm = TRUE))
 
 
-    total <- data %>%
+    total <- base_avicca %>%
       dplyr::group_by(operateurs)%>%
       dplyr::summarise(nbr_log_refus_tiers = sum(source_orange_nbr_log_refus_tiers, na.rm = TRUE),
                 nb_log_blocage_eligibilite = sum(source_orange_nb_log_blocage_eligibilite, na.rm = TRUE),
@@ -421,13 +419,13 @@ prod_stats <- function(avicca, departements, orange_data=NULL){
     # Feuille 13- Refus tiers bloc - zonage : refus tiers et blocages éligibilité FttH par zonage avec filtre niveau de couverture FttH
 
 
-    stats_bloc_elig_refus_tiers_zonage <- data %>%
+    stats_bloc_elig_refus_tiers_zonage <- base_avicca %>%
       dplyr::group_by(zonage, niveau_couverture_ftth)%>%
       dplyr::summarise(nbr_log_refus_tiers = sum(source_orange_nbr_log_refus_tiers, na.rm = TRUE),
                 nb_log_blocage_eligibilite = sum(source_orange_nb_log_blocage_eligibilite, na.rm = TRUE))
 
 
-    total <- data %>%
+    total <- base_avicca %>%
       dplyr::group_by(zonage)%>%
       dplyr::summarise(nbr_log_refus_tiers = sum(source_orange_nbr_log_refus_tiers, na.rm = TRUE),
                 nb_log_blocage_eligibilite = sum(source_orange_nb_log_blocage_eligibilite, na.rm = TRUE),

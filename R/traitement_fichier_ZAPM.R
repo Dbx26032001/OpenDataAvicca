@@ -37,7 +37,7 @@ manip_fichier_zapm <- function(avicca, chemin_fichier_zapm, name_fichier_zapm){
   zapm_dbf <- zapm_dbf %>%
     dplyr::mutate(date_debut = as.Date(date_debut))%>%
     dplyr::left_join(
-      avicca_last_version %>%
+      avicca %>%
         select(`Code commune`, `Zonage identifié Avicca`, type_zonage),
       by = c("INSEE_COM" = "Code commune"))%>%
     dplyr::mutate(
